@@ -53,7 +53,44 @@ export const HomeView: FC = () => {
 // Keep the name `GameSandbox` and the `FC` type.
 
 const GameSandbox: FC = () => {
-  // ==================== TYPES ====================
+  const SmallLaserIcon = () => (
+    <svg
+      width="28"
+      height="28"
+      viewBox="0 0 24 24"
+      fill="none"
+    >
+      {/* Side emitters */}
+      <rect x="2" y="9" width="3" height="6" rx="1" fill="white" />
+      <rect x="19" y="9" width="3" height="6" rx="1" fill="white" />
+
+      {/* Core laser */}
+      <rect x="7" y="10" width="10" height="4" rx="2" fill="white" />
+
+      {/* Center dot */}
+      <circle cx="12" cy="12" r="1.2" fill="white" />
+    </svg>
+  );
+
+  const BigLaserIcon = () => (
+    <svg
+      width="30"
+      height="30"
+      viewBox="0 0 24 24"
+      fill="none"
+    >
+      {/* Side cannons */}
+      <rect x="1.5" y="8" width="4" height="8" rx="1.5" fill="white" />
+      <rect x="18.5" y="8" width="4" height="8" rx="1.5" fill="white" />
+
+      {/* Main laser body */}
+      <rect x="6" y="7" width="12" height="10" rx="3" fill="white" />
+
+      {/* Inner energy core */}
+      <rect x="9" y="9.5" width="6" height="5" rx="2" fill="white" opacity="0.6" />
+    </svg>
+  );
+
   interface Enemy {
     x: number;
     y: number;
@@ -67,6 +104,10 @@ const GameSandbox: FC = () => {
     frameX: number;
     frameY: number;
     remove: boolean;
+    waveId: number;
+    waveBaseX?: number;
+    waveBaseY?: number;
+    waveSpeedX?: number;
   }
 
   interface Projectile {
@@ -78,21 +119,21 @@ const GameSandbox: FC = () => {
     speed: number;
   }
 
-  // ==================== STATE ====================
   const [score, setScore] = useState(0);
-  const [lives, setLives] = useState(3);
+  const [lives, setLives] = useState(1);
   const [energy, setEnergy] = useState(50);
   const [wave, setWave] = useState(1);
   const [gameOver, setGameOver] = useState(false);
   const [gameStarted, setGameStarted] = useState(false);
+  const [isPaused, setIsPaused] = useState(false);
+  const [pauseMenuOpen, setPauseMenuOpen] = useState(false);
   const [, setTick] = useState(0); // Force re-renders
   const [totalCoins, setTotalCoins] = useState(0);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [shipsOpen, setShipsOpen] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
 
-  // ==================== REFS ====================
-  const playerRef = useRef({ x: 145, y: 520, width: 70, height: 60, speed: 3 });
+  const playerRef = useRef({ x: 145, y: 420, width: 70, height: 60, speed: 3 });
   const enemiesRef = useRef<Enemy[]>([]);
   const projectilesRef = useRef<Projectile[]>([]);
   const waveRef = useRef({ x: 0, y: -200, speedX: 1.5, speedY: 0, columns: 1, rows: 1 });
@@ -106,17 +147,41 @@ const GameSandbox: FC = () => {
   const bossLivesRef = useRef(10);
   const columnsRef = useRef(1);
   const rowsRef = useRef(1);
+  const autoFireTimerRef = useRef(0);
+  const touchStartXRef = useRef(0);
+  const isDraggingRef = useRef(false);
+  const waveSpawnTimerRef = useRef(0);
+  const lastSpawnTimeRef = useRef(0);
 
-  // ==================== GAME CONSTANTS ====================
+  // Audio refs
+  const homeBgAudioRef = useRef<HTMLAudioElement | null>(null);
+  const gameplayBgAudioRef = useRef<HTMLAudioElement | null>(null);
+  const buttonClickAudioRef = useRef<HTMLAudioElement | null>(null);
+  const menuOpenAudioRef = useRef<HTMLAudioElement | null>(null);
+  const normalFireAudioRef = useRef<HTMLAudioElement | null>(null);
+  const smallLaserAudioRef = useRef<HTMLAudioElement | null>(null);
+  const bigLaserAudioRef = useRef<HTMLAudioElement | null>(null);
+  const enemyHitAudioRef = useRef<HTMLAudioElement | null>(null);
+  const enemyExplodeAudioRef = useRef<HTMLAudioElement | null>(null);
+  const bossHitAudioRef = useRef<HTMLAudioElement | null>(null);
+  const bossExplodeAudioRef = useRef<HTMLAudioElement | null>(null);
+  const gameOverAudioRef = useRef<HTMLAudioElement | null>(null);
+
   const GAME_WIDTH = 360;
   const GAME_HEIGHT = 600;
   const ENEMY_SIZE = 40;
-  const PLAYER_MAX_LIVES = 3;
+  const PLAYER_MAX_LIVES = 1;
   const SPRITE_INTERVAL = 150;
 
-  // ==================== GAME FUNCTIONS ====================
+  // Audio helper function
+  const playSound = (audioRef: React.MutableRefObject<HTMLAudioElement | null>) => {
+    if (!isMuted && audioRef.current) {
+      audioRef.current.currentTime = 0;
+      audioRef.current.play().catch(() => {});
+    }
+  };
   
-  // Initialize projectile pool
+  // Initialize projectile pool and audio
   useEffect(() => {
     projectilesRef.current = Array(10).fill(null).map(() => ({
       x: 0,
@@ -132,6 +197,45 @@ const GameSandbox: FC = () => {
     if (savedCoins) {
       setTotalCoins(parseInt(savedCoins, 10));
     }
+
+    // Initialize audio files
+    homeBgAudioRef.current = new Audio('/assets/aud/home-bg-audio.mp3');
+    homeBgAudioRef.current.loop = true;
+    homeBgAudioRef.current.volume = 0.3;
+
+    gameplayBgAudioRef.current = new Audio('/assets/aud/gameplay-bg-audio.mp3');
+    gameplayBgAudioRef.current.loop = true;
+    gameplayBgAudioRef.current.volume = 0.3;
+
+    buttonClickAudioRef.current = new Audio('/assets/aud/button-click.mp3');
+    buttonClickAudioRef.current.volume = 0.5;
+
+    menuOpenAudioRef.current = new Audio('/assets/aud/menu-open.mp3');
+    menuOpenAudioRef.current.volume = 0.5;
+
+    normalFireAudioRef.current = new Audio('/assets/aud/normal-fire.mp3');
+    normalFireAudioRef.current.volume = 0.3;
+
+    smallLaserAudioRef.current = new Audio('/assets/aud/small-lazor.mp3');
+    smallLaserAudioRef.current.volume = 0.4;
+
+    bigLaserAudioRef.current = new Audio('/assets/aud/big-lazor.mp3');
+    bigLaserAudioRef.current.volume = 0.4;
+
+    enemyHitAudioRef.current = new Audio('/assets/aud/enemy-hit.mp3');
+    enemyHitAudioRef.current.volume = 0.4;
+
+    enemyExplodeAudioRef.current = new Audio('/assets/aud/enemy-explode.mp3');
+    enemyExplodeAudioRef.current.volume = 0.5;
+
+    bossHitAudioRef.current = new Audio('/assets/aud/boss-hit.mp3');
+    bossHitAudioRef.current.volume = 0.5;
+
+    bossExplodeAudioRef.current = new Audio('/assets/aud/boss-explode.mp3');
+    bossExplodeAudioRef.current.volume = 0.6;
+
+    gameOverAudioRef.current = new Audio('/assets/aud/game-over.mp3');
+    gameOverAudioRef.current.volume = 0.5;
   }, []);
 
   // Collision detection
@@ -156,18 +260,24 @@ const GameSandbox: FC = () => {
       proj.active = true;
       proj.x = playerRef.current.x + playerRef.current.width / 2 - proj.width / 2;
       proj.y = playerRef.current.y;
+      playSound(normalFireAudioRef);
     }
   };
 
   // Spawn wave
   const spawnWave = () => {
+    const waveId = Date.now(); // Unique ID for this wave
+    const waveSpeedX = (Math.random() < 0.5 ? -1 : 1) * (1.3 + Math.random() * 0.7);
+    const waveBaseX = GAME_WIDTH / 2 - (columnsRef.current * ENEMY_SIZE) / 2;
+    const waveBaseY = -rowsRef.current * ENEMY_SIZE;
+    
     const newEnemies: Enemy[] = [];
     for (let row = 0; row < rowsRef.current; row++) {
       for (let col = 0; col < columnsRef.current; col++) {
-        const isRhino = Math.random() < 0.3;
+        const isRhino = Math.random() < 0.35;
         newEnemies.push({
-          x: 0,
-          y: 0,
+          x: waveBaseX + col * ENEMY_SIZE,
+          y: waveBaseY + row * ENEMY_SIZE,
           width: ENEMY_SIZE,
           height: ENEMY_SIZE,
           type: isRhino ? 'rhino' : 'beetle',
@@ -177,20 +287,24 @@ const GameSandbox: FC = () => {
           posY: row * ENEMY_SIZE,
           frameX: 0,
           frameY: Math.floor(Math.random() * 4),
-          remove: false
+          remove: false,
+          waveId: waveId,
+          waveBaseX: waveBaseX,
+          waveBaseY: waveBaseY,
+          waveSpeedX: waveSpeedX
         });
       }
     }
-    enemiesRef.current = newEnemies;
-    waveRef.current.x = GAME_WIDTH / 2 - (columnsRef.current * ENEMY_SIZE) / 2;
-    waveRef.current.y = -rowsRef.current * ENEMY_SIZE;
-    waveRef.current.speedX = Math.random() < 0.5 ? -1.5 : 1.5;
+    
+    // Add to existing enemies instead of replacing
+    enemiesRef.current = [...enemiesRef.current, ...newEnemies];
   };
 
   // Spawn boss
   const spawnBoss = () => {
-    enemiesRef.current = [{
-      x: GAME_WIDTH / 2 - 100,
+    const waveId = Date.now();
+    const boss: Enemy = {
+      x: GAME_WIDTH / 2 - 50,
       y: -100,
       width: 100,
       height: 100,
@@ -201,9 +315,13 @@ const GameSandbox: FC = () => {
       posY: 0,
       frameX: 0,
       frameY: Math.floor(Math.random() * 4),
-      remove: false
-    }];
-    waveRef.current.speedX = Math.random() < 0.5 ? -1.5 : 1.5;
+      remove: false,
+      waveId: waveId,
+      waveSpeedX: (Math.random() < 0.5 ? -1 : 1) * (1.0 + Math.random() * 0.6)
+    };
+    
+    // Add boss to existing enemies
+    enemiesRef.current = [...enemiesRef.current, boss];
   };
 
   // Next wave
@@ -213,19 +331,16 @@ const GameSandbox: FC = () => {
       if (nextWave % 5 === 0) {
         spawnBoss();
       } else {
-        if (Math.random() < 0.5 && columnsRef.current * ENEMY_SIZE < GAME_WIDTH * 0.8) {
+        if (Math.random() < 0.5 && columnsRef.current < 4) {
           columnsRef.current++;
-        } else if (rowsRef.current * ENEMY_SIZE < GAME_HEIGHT * 0.6) {
+        }
+        if (Math.random() < 0.5 && rowsRef.current < 3) {
           rowsRef.current++;
         }
-        if (columnsRef.current > 3) columnsRef.current = 3;
-        if (rowsRef.current > 3) rowsRef.current = 3;
         spawnWave();
       }
       return nextWave;
     });
-    
-    setLives(prev => Math.min(prev + 1, PLAYER_MAX_LIVES));
   };
 
   // Update player
@@ -254,42 +369,68 @@ const GameSandbox: FC = () => {
 
   // Update enemies
   const updateEnemies = () => {
-    const wave = waveRef.current;
     const enemies = enemiesRef.current;
     
     if (enemies.length === 0) return;
 
-    const isBoss = enemies[0].type === 'boss';
+    // Group enemies by waveId
+    const waveGroups = new Map<number, Enemy[]>();
+    enemies.forEach(enemy => {
+      if (!waveGroups.has(enemy.waveId)) {
+        waveGroups.set(enemy.waveId, []);
+      }
+      waveGroups.get(enemy.waveId)?.push(enemy);
+    });
 
-    if (isBoss) {
-      const boss = enemies[0];
-      if (boss.y < 0) {
-        boss.y += 2;
-      }
-      if (boss.x <= 0 || boss.x >= GAME_WIDTH - boss.width) {
-        wave.speedX *= -1;
-        boss.y += boss.height * 0.3;
-      }
-      boss.x += wave.speedX * 0.5;
-    } else {
-      if (wave.y < 0) wave.y += 3;
+    // Update each wave independently
+    waveGroups.forEach((waveEnemies) => {
+      if (waveEnemies.length === 0) return;
       
-      const waveWidth = columnsRef.current * ENEMY_SIZE;
-      if (wave.x < 0 || wave.x > GAME_WIDTH - waveWidth) {
-        wave.speedX *= -1;
-        wave.speedY = ENEMY_SIZE;
+      const isBoss = waveEnemies[0].type === 'boss';
+
+      if (isBoss) {
+        const boss = waveEnemies[0];
+        if (boss.y < 0) {
+          boss.y += 2;
+        }
+        if (boss.x <= 0 || boss.x >= GAME_WIDTH - boss.width) {
+          boss.waveSpeedX = (boss.waveSpeedX || 1.5) * -1;
+          boss.y += boss.height * 0.3;
+        }
+        boss.x += (boss.waveSpeedX || 1.5) * 0.5;
       } else {
-        wave.speedY = 0;
-      }
-      
-      wave.x += wave.speedX;
-      wave.y += wave.speedY;
+        // Regular wave movement
+        const firstEnemy = waveEnemies[0];
+        const waveSpeedX = firstEnemy.waveSpeedX || 2;
+        let waveBaseX = firstEnemy.waveBaseX || 0;
+        let waveBaseY = firstEnemy.waveBaseY || 0;
+        
+        // Move wave down if still entering
+        if (waveBaseY < 0) {
+          waveBaseY += 4;
+        }
+        
+        const waveWidth = columnsRef.current * ENEMY_SIZE;
+        let speedY = 0;
+        
+        // Check boundaries and reverse direction
+        if (waveBaseX < 0 || waveBaseX > GAME_WIDTH - waveWidth) {
+          firstEnemy.waveSpeedX = waveSpeedX * -1;
+          speedY = ENEMY_SIZE;
+        }
+        
+        waveBaseX += firstEnemy.waveSpeedX || waveSpeedX;
+        waveBaseY += speedY;
 
-      enemies.forEach(enemy => {
-        enemy.x = wave.x + enemy.posX;
-        enemy.y = wave.y + enemy.posY;
-      });
-    }
+        // Update all enemies in this wave
+        waveEnemies.forEach(enemy => {
+          enemy.waveBaseX = waveBaseX;
+          enemy.waveBaseY = waveBaseY;
+          enemy.x = waveBaseX + enemy.posX;
+          enemy.y = waveBaseY + enemy.posY;
+        });
+      }
+    });
   };
 
   // Update lasers
@@ -297,8 +438,23 @@ const GameSandbox: FC = () => {
     const isSmallLaser = keysRef.current.has('s');
     const isBigLaser = keysRef.current.has('d');
     
+    const wasSmallLaserActive = laserActiveRef.current.small;
+    const wasBigLaserActive = laserActiveRef.current.big;
+    
     laserActiveRef.current.small = isSmallLaser;
     laserActiveRef.current.big = isBigLaser;
+
+    // Handle small laser audio - play once when activated
+    if (isSmallLaser && !wasSmallLaserActive && !isMuted && smallLaserAudioRef.current) {
+      smallLaserAudioRef.current.currentTime = 0;
+      smallLaserAudioRef.current.play().catch(() => {});
+    }
+
+    // Handle big laser audio - play once when activated
+    if (isBigLaser && !wasBigLaserActive && !isMuted && bigLaserAudioRef.current) {
+      bigLaserAudioRef.current.currentTime = 0;
+      bigLaserAudioRef.current.play().catch(() => {});
+    }
 
     if ((isSmallLaser || isBigLaser) && energyRef.current > 1 && !energyDepletedRef.current) {
       const damage = isBigLaser ? 0.8 : 0.5;
@@ -320,12 +476,15 @@ const GameSandbox: FC = () => {
       }
     }
 
-    if (energyRef.current < PLAYER_MAX_LIVES) {
-      energyRef.current = Math.min(100, energyRef.current + 0.06);
+    if (energyRef.current < 100) {
+      energyRef.current = Math.min(100, energyRef.current + 0.12);
     }
 
     if (energyRef.current < 1) {
       energyDepletedRef.current = true;
+      // Clear laser keys to prevent auto-trigger when energy returns
+      keysRef.current.delete('s');
+      keysRef.current.delete('d');
     } else if (energyRef.current > 30) {
       energyDepletedRef.current = false;
     }
@@ -341,13 +500,28 @@ const GameSandbox: FC = () => {
       if (enemy.lives <= 0) {
         if (spriteUpdateRef.current) {
           enemy.frameX++;
+          if (enemy.frameX === 1) {
+            // Play explode sound on first death frame
+            if (enemy.type === 'boss') {
+              playSound(bossExplodeAudioRef);
+            } else {
+              playSound(enemyExplodeAudioRef);
+            }
+          }
           if (enemy.frameX > (enemy.type === 'boss' ? 11 : enemy.type === 'rhino' ? 5 : 2)) {
             enemy.remove = true;
             if (!gameOver) {
-              setScore(prev => prev + enemy.maxLives);
+              const coinValue = enemy.maxLives;
+              setScore(prev => prev + coinValue);
+              // Add coins immediately when enemy is killed
+              setTotalCoins(prev => {
+                const newTotal = prev + coinValue;
+                localStorage.setItem('laserfall_coins', newTotal.toString());
+                return newTotal;
+              });
             }
             if (enemy.type === 'boss') {
-              bossLivesRef.current += 5;
+              bossLivesRef.current += 7;
             }
           }
         }
@@ -370,37 +544,112 @@ const GameSandbox: FC = () => {
           const newLives = prev - 1;
           if (newLives <= 0) {
             setGameOver(true);
+            // Stop gameplay music and play game over sound
+            if (gameplayBgAudioRef.current) {
+              gameplayBgAudioRef.current.pause();
+            }
+            playSound(gameOverAudioRef);
           }
           return newLives;
         });
-      }
-
-      if (enemy.y + enemy.height > GAME_HEIGHT && enemy.lives > 0) {
-        setGameOver(true);
       }
     });
 
     enemiesRef.current = enemiesRef.current.filter(e => !e.remove);
 
-    if (enemiesRef.current.length === 0 && !gameOver && gameStarted) {
-      nextWave();
+    // Start wave spawn timer continuously (not just when screen cleared)
+    if (waveSpawnTimerRef.current === 0 && !gameOver && gameStarted) {
+      const spawnDelay = 2000 + Math.random() * 4000; // Random 2-6 seconds
+      waveSpawnTimerRef.current = spawnDelay;
+    }
+  };
+
+  // Resume with coins
+  const resumeWithCoins = () => {
+    if (totalCoins > 5000) {
+      playSound(buttonClickAudioRef);
+      const newTotal = totalCoins - 5000;
+      setTotalCoins(newTotal);
+      localStorage.setItem('laserfall_coins', newTotal.toString());
+      setGameOver(false);
+      setLives(1);
+      // Continue from where player died
+      spawnWave();
+      // Resume gameplay music
+      if (!isMuted && gameplayBgAudioRef.current) {
+        gameplayBgAudioRef.current.play().catch(() => {});
+      }
     }
   };
 
   // Restart game
   const restart = () => {
-    // Save coins earned in this session
-    const newTotal = totalCoins + score;
-    setTotalCoins(newTotal);
-    localStorage.setItem('laserfall_coins', newTotal.toString());
+    playSound(buttonClickAudioRef);
+    // Coins already saved during gameplay, no need to add score again
     
     setScore(0);
-    setLives(3);
+    setLives(1);
     setEnergy(50);
     setWave(1);
     setGameOver(false);
+    setIsPaused(false);
+    setPauseMenuOpen(false);
     playerRef.current.x = 145;
-    playerRef.current.y = 520;
+    playerRef.current.y = 420;
+    energyRef.current = 50;
+    energyDepletedRef.current = false;
+    columnsRef.current = 1;
+    rowsRef.current = 1;
+    bossLivesRef.current = 10;
+    enemiesRef.current = [];
+    projectilesRef.current.forEach(p => p.active = false);
+    keysRef.current.clear();
+    autoFireTimerRef.current = 0;
+    waveSpawnTimerRef.current = 0;
+    isDraggingRef.current = false;
+    setSettingsOpen(false);
+    setShipsOpen(false);
+    spawnWave();
+    // Start gameplay music
+    if (!isMuted && gameplayBgAudioRef.current) {
+      gameplayBgAudioRef.current.play().catch(() => {});
+    }
+  };
+
+  // Start game
+  const startGame = () => {
+    playSound(buttonClickAudioRef);
+    setGameStarted(true);
+    setIsPaused(false);
+    setPauseMenuOpen(false);
+    setSettingsOpen(false);
+    setShipsOpen(false);
+    enemiesRef.current = [];
+    spawnWave();
+    // Stop home music and start gameplay music
+    if (homeBgAudioRef.current) {
+      homeBgAudioRef.current.pause();
+    }
+    if (!isMuted && gameplayBgAudioRef.current) {
+      gameplayBgAudioRef.current.play().catch(() => {});
+    }
+  };
+  
+  // Go to home
+  const goHome = () => {
+    playSound(buttonClickAudioRef);
+    // Coins already saved during gameplay, no need to add score again
+    
+    setGameStarted(false);
+    setGameOver(false);
+    setIsPaused(false);
+    setPauseMenuOpen(false);
+    setScore(0);
+    setLives(1);
+    setEnergy(50);
+    setWave(1);
+    playerRef.current.x = 145;
+    playerRef.current.y = 420;
     energyRef.current = 50;
     energyDepletedRef.current = false;
     columnsRef.current = 1;
@@ -408,27 +657,27 @@ const GameSandbox: FC = () => {
     bossLivesRef.current = 10;
     projectilesRef.current.forEach(p => p.active = false);
     keysRef.current.clear();
-    setSettingsOpen(false);
-    setShipsOpen(false);
-    spawnWave();
-  };
-
-  // Start game
-  const startGame = () => {
-    setGameStarted(true);
-    setSettingsOpen(false);
-    setShipsOpen(false);
-    spawnWave();
+    autoFireTimerRef.current = 0;
+    waveSpawnTimerRef.current = 0;
+    isDraggingRef.current = false;
+    // Stop gameplay music and start home music
+    if (gameplayBgAudioRef.current) {
+      gameplayBgAudioRef.current.pause();
+    }
+    if (!isMuted && homeBgAudioRef.current) {
+      homeBgAudioRef.current.play().catch(() => {});
+    }
   };
   
   // Reset all progress
   const resetProgress = () => {
+    playSound(buttonClickAudioRef);
     setTotalCoins(0);
     localStorage.setItem('laserfall_coins', '0');
     setSettingsOpen(false);
   };
 
-  // ==================== EVENT HANDLERS ====================
+  // EVENT HANDLERS
   
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -462,27 +711,68 @@ const GameSandbox: FC = () => {
     };
   }, [gameOver, gameStarted]);
 
+  // Control background music based on game state
+  useEffect(() => {
+    if (!gameStarted && !gameOver) {
+      // Home screen
+      if (!isMuted && homeBgAudioRef.current) {
+        homeBgAudioRef.current.play().catch(() => {});
+      }
+    }
+  }, [gameStarted, gameOver, isMuted]);
+
+  // Control mute state for all audio
+  useEffect(() => {
+    if (isMuted) {
+      // Pause all audio
+      homeBgAudioRef.current?.pause();
+      gameplayBgAudioRef.current?.pause();
+      smallLaserAudioRef.current?.pause();
+      bigLaserAudioRef.current?.pause();
+    } else {
+      // Resume appropriate background music
+      if (!gameStarted && !gameOver && homeBgAudioRef.current) {
+        homeBgAudioRef.current.play().catch(() => {});
+      } else if (gameStarted && !gameOver && !isPaused && gameplayBgAudioRef.current) {
+        gameplayBgAudioRef.current.play().catch(() => {});
+      }
+    }
+  }, [isMuted, gameStarted, gameOver, isPaused]);
+
   // Touch handlers
   const handleTouchStart = (key: string) => {
     if (!gameStarted || gameOver) return;
-    keysRef.current.add(key);
-    if (key === ' ' && !projectileFiredRef.current) {
-      projectileFiredRef.current = true;
-      fireProjectile();
+    
+    if (key === 's' || key === 'd') {
+      // Laser keys - single activation only
+      if (!keysRef.current.has(key)) {
+        keysRef.current.add(key);
+        // Remove immediately for single-shot behavior
+        setTimeout(() => keysRef.current.delete(key), 50);
+      }
+    } else {
+      keysRef.current.add(key);
+      if (key === ' ' && !projectileFiredRef.current) {
+        projectileFiredRef.current = true;
+        fireProjectile();
+      }
     }
   };
 
   const handleTouchEnd = (key: string) => {
-    keysRef.current.delete(key);
+    // For non-laser keys, remove on release
+    if (key !== 's' && key !== 'd') {
+      keysRef.current.delete(key);
+    }
     if (key === ' ') {
       projectileFiredRef.current = false;
     }
   };
 
-  // ==================== GAME LOOP ====================
+  // GAME LOOP
   
   useEffect(() => {
-    if (!gameStarted || gameOver) return;
+    if (!gameStarted || gameOver || isPaused) return;
 
     let lastTime = 0;
     let animationFrameId: number;
@@ -500,6 +790,24 @@ const GameSandbox: FC = () => {
         spriteUpdateRef.current = false;
       }
 
+      // Auto-fire logic
+      autoFireTimerRef.current += deltaTime;
+      if (autoFireTimerRef.current > 180) {
+        autoFireTimerRef.current = 0;
+        fireProjectile();
+      }
+
+      // Wave spawn timer - countdown and spawn when reaches 0
+      if (waveSpawnTimerRef.current > 0) {
+        waveSpawnTimerRef.current -= deltaTime;
+        if (waveSpawnTimerRef.current <= 0) {
+          nextWave();
+          waveSpawnTimerRef.current = 0;
+        }
+      }
+
+      // Update game objects
+
       // Update game objects
       updatePlayer();
       updateProjectiles();
@@ -516,103 +824,76 @@ const GameSandbox: FC = () => {
     animationFrameId = requestAnimationFrame(gameLoop);
 
     return () => cancelAnimationFrame(animationFrameId);
-  }, [gameStarted, gameOver]);
+  }, [gameStarted, gameOver, isPaused]);
 
-  // ==================== RENDER ====================
+  // RENDER
   
   return (
     <div className="relative w-full h-full bg-black overflow-hidden" style={{ width: `${GAME_WIDTH}px`, height: `${GAME_HEIGHT}px` }}>
       
-      {/* Starfield Background */}
-      <div className="absolute inset-0">
-        {Array.from({ length: 50 }).map((_, i) => (
-          <div
-            key={i}
-            className="absolute bg-white rounded-full"
-            style={{
-              width: `${Math.random() * 2 + 1}px`,
-              height: `${Math.random() * 2 + 1}px`,
-              left: `${Math.random() * 100}%`,
-              top: `${Math.random() * 100}%`,
-              opacity: Math.random() * 0.7 + 0.3,
-              animation: `twinkle ${Math.random() * 3 + 2}s infinite`
-            }}
-          />
-        ))}
-      </div>
+      {/* Gameplay Background */}
+      <div 
+        className="absolute inset-0"
+        style={{
+          backgroundImage: "url('/assets/img/Gameplay_Background.png')",
+          backgroundSize: 'cover',
+          backgroundPosition: 'center'
+        }}
+      />
       
-      <style jsx>{`
-        @keyframes twinkle {
-          0%, 100% { opacity: 0.3; }
-          50% { opacity: 1; }
-        }
-      `}</style>
-      
-      {/* UI - Score, Wave, Lives - Enhanced */}
+      {/* Pause Button - Top Left */}
       {gameStarted && !gameOver && (
-        <div className="absolute top-2 left-2 right-2 z-10">
-          <div className="bg-black/60 backdrop-blur-sm rounded-lg px-3 py-2 border border-cyan-500/30 shadow-lg">
-            <div className="flex items-start justify-between">
-              {/* Left: Score & Wave stacked */}
-              <div className="flex flex-col gap-1">
-                <div
-                  className="flex items-center gap-1.5 text-cyan-400 text-sm font-bold"
-                  style={{ textShadow: '0 0 10px rgba(34,211,238,0.8)' }}
-                >
-                  <span className="text-[10px]">SCORE</span>
-                  <span className="text-white">{score}</span>
-                </div>
-                <div
-                  className="flex items-center gap-1.5 text-purple-400 text-xs font-bold"
-                  style={{ textShadow: '0 0 8px rgba(192,132,252,0.6)' }}
-                >
-                  <span className="text-[10px]">WAVE</span>
-                  <span className="text-white">{wave}</span>
-                </div>
-              </div>
-              
-              {/* Right: Lives */}
-              <div className="flex flex-col items-end gap-1">
-                <span className="text-[9px] text-red-400 font-bold">LIVES</span>
-                <div className="flex gap-1">
-                  {Array.from({ length: PLAYER_MAX_LIVES }).map((_, i) => (
-                    <div
-                      key={i}
-                      className={`w-2.5 h-4 border-2 rounded-sm transition-all ${
-                        i < lives 
-                          ? 'bg-red-500 border-red-300 shadow-[0_0_8px_rgba(239,68,68,0.6)]' 
-                          : 'bg-transparent border-red-900/50'
-                      }`}
-                    />
-                  ))}
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            playSound(menuOpenAudioRef);
+            setIsPaused(true);
+            setPauseMenuOpen(true);
+            if (gameplayBgAudioRef.current) {
+              gameplayBgAudioRef.current.pause();
+            }
+          }}
+          onTouchStart={(e) => {
+            e.stopPropagation();
+          }}
+          onTouchEnd={(e) => {
+            e.stopPropagation();
+            playSound(menuOpenAudioRef);
+            setIsPaused(true);
+            setPauseMenuOpen(true);
+            if (gameplayBgAudioRef.current) {
+              gameplayBgAudioRef.current.pause();
+            }
+          }}
+          className="absolute top-3 left-3 z-40 flex items-center justify-center w-12 h-12 rounded-xl bg-gradient-to-b from-purple-500 to-purple-700 border-3 border-orange-400 shadow-[0_0_15px_rgba(255,140,0,0.5)] active:scale-95 transition-transform"
+        >
+          <span className="absolute inset-1 rounded-lg bg-purple-600 opacity-80"></span>
+          <span className="relative z-10">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="white">
+              <path d="M6 4h4v16H6V4Zm8 0h4v16h-4V4Z"/>
+            </svg>
+          </span>
+        </button>
       )}
 
-      {/* Energy Bar - Enhanced */}
+      {/* Energy Bar - 12 Small Candles Below Coins */}
       {gameStarted && !gameOver && (
-        <div className="absolute top-20 left-2 z-10">
-          <div className="bg-black/60 backdrop-blur-sm rounded-lg px-2 py-1.5 border border-yellow-500/30">
-            <div className="text-[9px] text-yellow-400 font-bold mb-1">
-              {energyDepletedRef.current ? '⚠️ OVERHEAT' : 'ENERGY'}
-            </div>
+        <div className="absolute top-20 right-3 z-10">
+          <div className="bg-black/80 rounded-lg px-2 py-1.5">
             <div className="flex gap-0.5">
-              {Array.from({ length: 50 }).map((_, i) => (
+              {Array.from({ length: 12 }).map((_, i) => (
                 <div
                   key={i}
-                  className={`w-1 h-4 rounded-sm transition-all ${
-                    i < Math.floor(energy / 2)
+                  className={`w-1.5 h-5 rounded-sm transition-all ${
+                    i < Math.floor(energy / 8.33)
                       ? energyDepletedRef.current 
-                        ? 'bg-red-500 shadow-[0_0_4px_rgba(239,68,68,0.8)]'
+                        ? 'bg-red-500 shadow-[0_0_4px_rgba(239,68,68,0.9)]'
                         : energy > 70
-                        ? 'bg-green-400 shadow-[0_0_4px_rgba(34,197,94,0.6)]'
+                        ? 'bg-green-400 shadow-[0_0_4px_rgba(34,197,94,0.7)]'
                         : energy > 40
-                        ? 'bg-yellow-400 shadow-[0_0_4px_rgba(234,179,8,0.6)]'
-                        : 'bg-orange-500 shadow-[0_0_4px_rgba(249,115,22,0.6)]'
-                      : 'bg-gray-800'
+                        ? 'bg-yellow-400 shadow-[0_0_4px_rgba(234,179,8,0.7)]'
+                        : 'bg-orange-500 shadow-[0_0_4px_rgba(249,115,22,0.7)]'
+                      : 'bg-gray-800/40'
                   }`}
                 />
               ))}
@@ -621,10 +902,35 @@ const GameSandbox: FC = () => {
         </div>
       )}
 
+      {/* Score - Top Right (Number Only) */}
+      {gameStarted && !gameOver && (
+        <div className="absolute top-3 right-3 z-10">
+          <div
+            className="text-white text-3xl font-bold"
+            style={{ textShadow: '0 0 15px rgba(34,211,238,0.8), 2px 2px 4px rgba(0,0,0,0.8)' }}
+          >
+            {score}
+          </div>
+        </div>
+      )}
+
+      {/* Coins - Below Score */}
+      {gameStarted && !gameOver && (
+        <div className="absolute top-12 right-3 z-10 flex items-center gap-1.5">
+          <img src="/assets/img/coin.png" alt="coin" className="w-6 h-6" />
+          <span
+            className="text-white text-xl font-bold"
+            style={{ textShadow: '2px 2px 4px rgba(0,0,0,0.8)' }}
+          >
+            {totalCoins}
+          </span>
+        </div>
+      )}
+
       {/* Player Ship */}
       {gameStarted && !gameOver && (
         <div
-          className="absolute transition-none"
+          className="absolute transition-none z-20"
           style={{
             left: `${playerRef.current.x}px`,
             top: `${playerRef.current.y}px`,
@@ -771,59 +1077,184 @@ const GameSandbox: FC = () => {
         </div>
       ))}
 
-      {/* Mobile Controls */}
-      {gameStarted && !gameOver && (
-        <div className="absolute bottom-2 left-0 right-0 flex flex-col items-center gap-2">
-          <div className="flex gap-4">
+      {/* Pause Menu Popover */}
+      {pauseMenuOpen && (
+        <div className="absolute inset-0 flex items-center justify-center z-30">
+          {/* Backdrop */}
+          <div
+            className="absolute inset-0 bg-black/70"
+            onClick={() => {
+              playSound(buttonClickAudioRef);
+              setIsPaused(false);
+              setPauseMenuOpen(false);
+              if (!isMuted && gameplayBgAudioRef.current) {
+                gameplayBgAudioRef.current.play().catch(() => {});
+              }
+            }}
+          />
+
+          {/* Panel */}
+          <div className="relative w-80 rounded-3xl bg-gradient-to-b from-purple-900 to-purple-800 p-6 shadow-2xl">
+            
+            {/* Close Button */}
             <button
-              onTouchStart={() => handleTouchStart('ArrowLeft')}
-              onTouchEnd={() => handleTouchEnd('ArrowLeft')}
-              onMouseDown={() => handleTouchStart('ArrowLeft')}
-              onMouseUp={() => handleTouchEnd('ArrowLeft')}
-              className="w-14 h-14 bg-blue-600/80 rounded-lg flex items-center justify-center text-white text-2xl font-bold active:bg-blue-500"
+              onClick={() => {
+                playSound(buttonClickAudioRef);
+                setIsPaused(false);
+                setPauseMenuOpen(false);
+                if (!isMuted && gameplayBgAudioRef.current) {
+                  gameplayBgAudioRef.current.play().catch(() => {});
+                }
+              }}
+              className="absolute -top-3 -right-3 w-10 h-10 rounded-full bg-red-500 text-white font-bold text-xl flex items-center justify-center shadow-lg active:scale-95"
             >
-              ←
+              ×
             </button>
-            <button
-              onTouchStart={() => handleTouchStart(' ')}
-              onTouchEnd={() => handleTouchEnd(' ')}
-              onMouseDown={() => handleTouchStart(' ')}
-              onMouseUp={() => handleTouchEnd(' ')}
-              className="w-14 h-14 bg-red-600/80 rounded-lg flex items-center justify-center text-white text-xs font-bold active:bg-red-500"
-            >
-              FIRE
-            </button>
-            <button
-              onTouchStart={() => handleTouchStart('ArrowRight')}
-              onTouchEnd={() => handleTouchEnd('ArrowRight')}
-              onMouseDown={() => handleTouchStart('ArrowRight')}
-              onMouseUp={() => handleTouchEnd('ArrowRight')}
-              className="w-14 h-14 bg-blue-600/80 rounded-lg flex items-center justify-center text-white text-2xl font-bold active:bg-blue-500"
-            >
-              →
-            </button>
-          </div>
-          <div className="flex gap-4">
-            <button
-              onTouchStart={() => handleTouchStart('s')}
-              onTouchEnd={() => handleTouchEnd('s')}
-              onMouseDown={() => handleTouchStart('s')}
-              onMouseUp={() => handleTouchEnd('s')}
-              className="w-14 h-14 bg-green-600/80 rounded-lg flex items-center justify-center text-white text-sm font-bold active:bg-green-500"
-            >
-              S
-            </button>
-            <button
-              onTouchStart={() => handleTouchStart('d')}
-              onTouchEnd={() => handleTouchEnd('d')}
-              onMouseDown={() => handleTouchStart('d')}
-              onMouseUp={() => handleTouchEnd('d')}
-              className="w-14 h-14 bg-yellow-600/80 rounded-lg flex items-center justify-center text-white text-sm font-bold active:bg-yellow-500"
-            >
-              D
-            </button>
+
+            {/* Buttons */}
+            <div className="flex flex-col gap-4">
+              {/* Resume Button */}
+              <button
+                onClick={() => {
+                  playSound(buttonClickAudioRef);
+                  setIsPaused(false);
+                  setPauseMenuOpen(false);
+                  if (!isMuted && gameplayBgAudioRef.current) {
+                    gameplayBgAudioRef.current.play().catch(() => {});
+                  }
+                }}
+                className="relative flex items-center justify-center gap-3 h-14 rounded-2xl bg-gradient-to-b from-purple-500 to-purple-700 border-4 border-orange-400 shadow-[0_0_18px_rgba(255,140,0,0.6)] active:scale-95 transition-transform"
+              >
+                <span className="absolute inset-1 rounded-xl bg-purple-600 opacity-80"></span>
+                <span className="relative z-10 flex items-center gap-3 text-white font-extrabold text-lg">
+                  RESUME
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="white">
+                    <path d="M8 5v14l11-7z"/>
+                  </svg>
+                </span>
+              </button>
+
+              {/* Restart Button */}
+              <button
+                onClick={restart}
+                className="relative flex items-center justify-center gap-3 h-14 rounded-2xl bg-gradient-to-b from-purple-500 to-purple-700 border-4 border-orange-400 shadow-[0_0_18px_rgba(255,140,0,0.6)] active:scale-95 transition-transform"
+              >
+                <span className="absolute inset-1 rounded-xl bg-purple-600 opacity-80"></span>
+                <span className="relative z-10 flex items-center gap-3 text-white font-extrabold text-lg">
+                  RESTART
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="white">
+                    <path d="M12 6V3L8 7l4 4V8c2.76 0 5 2.24 5 5a5 5 0 0 1-9.9 1H5a7 7 0 1 0 7-8Z"/>
+                  </svg>
+                </span>
+              </button>
+
+              {/* Home Button */}
+              <button
+                onClick={goHome}
+                className="relative flex items-center justify-center gap-3 h-14 rounded-2xl bg-gradient-to-b from-purple-500 to-purple-700 border-4 border-orange-400 shadow-[0_0_18px_rgba(255,140,0,0.6)] active:scale-95 transition-transform"
+              >
+                <span className="absolute inset-1 rounded-xl bg-purple-600 opacity-80"></span>
+                <span className="relative z-10 flex items-center gap-3 text-white font-extrabold text-lg">
+                  HOME
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="white">
+                    <path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/>
+                  </svg>
+                </span>
+              </button>
+            </div>
           </div>
         </div>
+      )}
+
+      {/* Touch Drag Area for Movement - Full Screen */}
+      {gameStarted && !gameOver && !isPaused && (
+        <div
+          className="absolute inset-0 z-10"
+          onTouchStart={(e) => {
+            const rect = e.currentTarget.getBoundingClientRect();
+            const touchX = e.touches[0].clientX - rect.left;
+            playerRef.current.x = touchX - playerRef.current.width / 2;
+            playerRef.current.x = Math.max(-playerRef.current.width * 0.5, Math.min(GAME_WIDTH - playerRef.current.width * 0.5, playerRef.current.x));
+          }}
+          onTouchMove={(e) => {
+            const rect = e.currentTarget.getBoundingClientRect();
+            const touchX = e.touches[0].clientX - rect.left;
+            playerRef.current.x = touchX - playerRef.current.width / 2;
+            playerRef.current.x = Math.max(-playerRef.current.width * 0.5, Math.min(GAME_WIDTH - playerRef.current.width * 0.5, playerRef.current.x));
+          }}
+          onMouseDown={(e) => {
+            const rect = e.currentTarget.getBoundingClientRect();
+            const mouseX = e.clientX - rect.left;
+            playerRef.current.x = mouseX - playerRef.current.width / 2;
+            playerRef.current.x = Math.max(-playerRef.current.width * 0.5, Math.min(GAME_WIDTH - playerRef.current.width * 0.5, playerRef.current.x));
+          }}
+          onMouseMove={(e) => {
+            if (e.buttons === 1) {
+              const rect = e.currentTarget.getBoundingClientRect();
+              const mouseX = e.clientX - rect.left;
+              playerRef.current.x = mouseX - playerRef.current.width / 2;
+              playerRef.current.x = Math.max(-playerRef.current.width * 0.5, Math.min(GAME_WIDTH - playerRef.current.width * 0.5, playerRef.current.x));
+            }
+          }}
+          style={{ pointerEvents: 'auto' }}
+        />
+      )}
+
+      {/* Laser Controls - Only Small and Big Laser */}
+      {gameStarted && !gameOver && !isPaused && (
+        <>
+          {/* SMALL LASER - Bottom Left */}
+          <button
+            onTouchStart={(e) => {
+              e.stopPropagation();
+              handleTouchStart('s');
+            }}
+            onTouchEnd={(e) => {
+              e.stopPropagation();
+              handleTouchEnd('s');
+            }}
+            onMouseDown={(e) => {
+              e.stopPropagation();
+              handleTouchStart('s');
+            }}
+            onMouseUp={(e) => {
+              e.stopPropagation();
+              handleTouchEnd('s');
+            }}
+            className="absolute bottom-6 left-2 w-20 h-20 rounded-2xl bg-gradient-to-b from-green-400 to-green-600 border-4 border-green-300 shadow-[0_0_18px_rgba(0,0,0,0.5)] active:scale-95 transition-transform flex items-center justify-center z-30"
+          >
+            <span className="absolute inset-1 rounded-xl bg-black/20"></span>
+            <div className="relative z-10">
+              <SmallLaserIcon />
+            </div>
+          </button>
+
+          {/* BIG LASER - Bottom Right */}
+          <button
+            onTouchStart={(e) => {
+              e.stopPropagation();
+              handleTouchStart('d');
+            }}
+            onTouchEnd={(e) => {
+              e.stopPropagation();
+              handleTouchEnd('d');
+            }}
+            onMouseDown={(e) => {
+              e.stopPropagation();
+              handleTouchStart('d');
+            }}
+            onMouseUp={(e) => {
+              e.stopPropagation();
+              handleTouchEnd('d');
+            }}
+            className="absolute bottom-6 right-2 w-20 h-20 rounded-2xl bg-gradient-to-b from-yellow-400 to-yellow-600 border-4 border-yellow-300 shadow-[0_0_18px_rgba(0,0,0,0.5)] active:scale-95 transition-transform flex items-center justify-center z-30"
+          >
+            <span className="absolute inset-1 rounded-xl bg-black/20"></span>
+            <div className="relative z-10">
+              <BigLaserIcon />
+            </div>
+          </button>
+        </>
       )}
 
       {/* Start Screen - Redesigned */}
@@ -857,7 +1288,10 @@ const GameSandbox: FC = () => {
           
           {/* Bottom Left: Settings Button (Icon Only) */}
           <button
-            onClick={() => setSettingsOpen(!settingsOpen)}
+            onClick={() => {
+              playSound(menuOpenAudioRef);
+              setSettingsOpen(!settingsOpen);
+            }}
             className="absolute bottom-12 left-6 flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-b from-purple-500 to-purple-700 border-4 border-orange-400 shadow-[0_0_20px_rgba(255,140,0,0.6)] active:scale-95 transition-transform"
           >
             <span className="absolute inset-1 rounded-xl bg-purple-600 opacity-80"></span>
@@ -870,7 +1304,10 @@ const GameSandbox: FC = () => {
           
           {/* Bottom Right: Ships Button (Icon Only) */}
           <button
-            onClick={() => setShipsOpen(!shipsOpen)}
+            onClick={() => {
+              playSound(menuOpenAudioRef);
+              setShipsOpen(!shipsOpen);
+            }}
             className="absolute bottom-12 right-6 flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-b from-purple-500 to-purple-700 border-4 border-orange-400 shadow-[0_0_20px_rgba(255,140,0,0.6)] active:scale-95 transition-transform"
           >
             <span className="absolute inset-1 rounded-xl bg-purple-600 opacity-80"></span>
@@ -887,7 +1324,10 @@ const GameSandbox: FC = () => {
               {/* Backdrop */}
               <div
                 className="absolute inset-0 bg-black/60"
-                onClick={() => setSettingsOpen(false)}
+                onClick={() => {
+                  playSound(buttonClickAudioRef);
+                  setSettingsOpen(false);
+                }}
               />
 
               {/* Panel */}
@@ -895,7 +1335,10 @@ const GameSandbox: FC = () => {
                 
                 {/* Close Button */}
                 <button
-                  onClick={() => setSettingsOpen(false)}
+                  onClick={() => {
+                    playSound(buttonClickAudioRef);
+                    setSettingsOpen(false);
+                  }}
                   className="absolute -top-3 -right-3 w-10 h-10 rounded-full bg-red-500 text-white font-bold text-xl flex items-center justify-center shadow-lg active:scale-95"
                 >
                   ×
@@ -905,7 +1348,10 @@ const GameSandbox: FC = () => {
                 <div className="flex flex-col gap-5">
                   {/* Mute Button */}
                   <button
-                    onClick={() => setIsMuted(!isMuted)}
+                    onClick={() => {
+                      playSound(buttonClickAudioRef);
+                      setIsMuted(!isMuted);
+                    }}
                     className="relative flex items-center justify-center gap-3 h-16 rounded-2xl bg-gradient-to-b from-purple-500 to-purple-700 border-4 border-orange-400 shadow-[0_0_18px_rgba(255,140,0,0.6)] active:scale-95 transition-transform"
                   >
                     <span className="absolute inset-1 rounded-xl bg-purple-600 opacity-80"></span>
@@ -952,7 +1398,10 @@ const GameSandbox: FC = () => {
               {/* Backdrop */}
               <div
                 className="absolute inset-0 bg-black/60"
-                onClick={() => setShipsOpen(false)}
+                onClick={() => {
+                  playSound(buttonClickAudioRef);
+                  setShipsOpen(false);
+                }}
               />
 
               {/* Panel */}
@@ -960,7 +1409,10 @@ const GameSandbox: FC = () => {
                 
                 {/* Close Button */}
                 <button
-                  onClick={() => setShipsOpen(false)}
+                  onClick={() => {
+                    playSound(buttonClickAudioRef);
+                    setShipsOpen(false);
+                  }}
                   className="absolute -top-3 -right-3 w-10 h-10 rounded-full bg-red-500 text-white font-bold text-xl flex items-center justify-center shadow-lg active:scale-95"
                 >
                   ×
@@ -984,48 +1436,100 @@ const GameSandbox: FC = () => {
 
       {/* Game Over Modal - Enhanced */}
       {gameOver && (
-        <div className="absolute inset-0 bg-gradient-to-b from-black via-red-950/20 to-black flex flex-col items-center justify-center">
-          <div className="mb-8 text-center">
-            <h2 className="text-7xl font-bold mb-2 text-center" style={{
-              background: 'linear-gradient(180deg, #ef4444 0%, #dc2626 50%, #991b1b 100%)',
-              WebkitBackgroundClip: 'text',
-              WebkitTextFillColor: 'transparent',
-              filter: 'drop-shadow(0 0 20px rgba(239,68,68,0.6))'
-            }}>
-              GAME OVER
-            </h2>
-          </div>
+        <div className="absolute inset-0 flex flex-col items-center justify-center">
+          {/* Gameplay Background */}
+          <div 
+            className="absolute inset-0"
+            style={{
+              backgroundImage: "url('/assets/img/Gameplay_Background.png')",
+              backgroundSize: 'cover',
+              backgroundPosition: 'center',
+              opacity: 0.3
+            }}
+          />
           
-          <div className="bg-black/70 backdrop-blur-sm rounded-lg px-8 py-6 mb-8 border border-red-500/30 shadow-lg">
-            <div className="text-center mb-4">
-              <div className="text-gray-400 text-xs mb-1">FINAL SCORE</div>
-              <div className="text-5xl font-bold text-white mb-3" style={{ textShadow: '0 0 20px rgba(6,182,212,0.5)' }}>
-                {score}
+          {/* Dark overlay */}
+          <div className="absolute inset-0 bg-black/70" />
+          
+          {/* Content */}
+          <div className="relative z-10 flex flex-col items-center">
+            {/* Custom GAME OVER Text */}
+            <div className="mb-6 flex justify-center">
+              <div className="flex">
+                {'GAME OVER'.split('').map((char, i) => (
+                  <span
+                    key={i}
+                    style={{
+                      fontSize: '3rem',
+                      fontWeight: 900,
+                      color: '#a855f7',
+                      textShadow: '0 0 8px #7c3aed, 0 0 16px #6d28d9, 0 0 24px #5b21b6',
+                      WebkitTextStroke: '2px #fbbf24',
+                      display: 'inline-block',
+                      margin: '0 2px'
+                    }}
+                  >
+                    {char === ' ' ? '\u00A0' : char}
+                  </span>
+                ))}
               </div>
             </div>
             
-            <div className="flex justify-center gap-8 mb-2">
-              <div className="flex items-center gap-2">
-                <div className="text-purple-400 text-xs">WAVE</div>
-                <div className="text-xl font-bold text-white">{wave}</div>
+            {/* Score Card */}
+            <div className="bg-black/80 backdrop-blur-sm rounded-lg px-8 py-6 mb-6 border border-red-500/30 shadow-lg">
+              <div className="text-center mb-4">
+                <div className="text-gray-400 text-xs mb-1">FINAL SCORE</div>
+                <div className="text-5xl font-bold text-white mb-3" style={{ textShadow: '0 0 20px rgba(6,182,212,0.5)' }}>
+                  {score}
+                </div>
               </div>
-
-              <div className="flex items-center gap-2">
-                <div className="text-red-400 text-xs">LIVES</div>
-                <div className="text-xl font-bold text-white">{lives}</div>
+              
+              <div className="flex justify-center gap-8 mb-2">
+                <div className="flex items-center gap-2">
+                  <img src="/assets/img/coin.png" alt="coin" className="w-6 h-6" />
+                  <div className="text-xl font-bold text-white">{totalCoins}</div>
+                </div>
               </div>
             </div>
+            
+            {/* Buttons */}
+            <div className="flex flex-col gap-3 w-64">
+              {/* Resume with Coins Button */}
+              <button
+                onClick={resumeWithCoins}
+                disabled={totalCoins < 5000}
+                className={`relative flex items-center justify-center gap-2 h-14 rounded-2xl border-4 shadow-lg transition-all ${
+                  totalCoins >= 5000
+                    ? 'bg-gradient-to-b from-green-500 to-green-700 border-green-300 shadow-[0_0_18px_rgba(34,197,94,0.6)] active:scale-95'
+                    : 'bg-gradient-to-b from-gray-600 to-gray-800 border-gray-500 opacity-50 cursor-not-allowed'
+                }`}
+              >
+                <span className="absolute inset-1 rounded-xl bg-black/20"></span>
+                <span className="relative z-10 flex items-center gap-2 text-white font-extrabold text-base">
+                  <img src="/assets/img/coin.png" alt="coin" className="w-5 h-5" />
+                  5000 - RESUME
+                </span>
+              </button>
+
+              {/* Play Again Button */}
+              <button
+                onClick={restart}
+                className="relative flex items-center justify-center h-14 rounded-2xl bg-gradient-to-b from-purple-500 to-purple-700 border-4 border-orange-400 shadow-[0_0_18px_rgba(255,140,0,0.6)] active:scale-95 transition-all"
+              >
+                <span className="absolute inset-1 rounded-xl bg-purple-600 opacity-80"></span>
+                <span className="relative z-10 text-white font-extrabold text-lg">START AGAIN</span>
+              </button>
+
+              {/* Home Button */}
+              <button
+                onClick={goHome}
+                className="relative flex items-center justify-center h-12 rounded-2xl bg-gradient-to-b from-purple-500 to-purple-700 border-4 border-orange-400 shadow-[0_0_18px_rgba(255,140,0,0.6)] active:scale-95 transition-all"
+              >
+                <span className="absolute inset-1 rounded-xl bg-purple-600 opacity-80"></span>
+                <span className="relative z-10 text-white font-extrabold text-base">HOME</span>
+              </button>
+            </div>
           </div>
-          
-          <button
-            onClick={restart}
-            className="px-10 py-4 bg-gradient-to-r from-cyan-600 to-blue-600 text-white rounded-lg font-bold text-xl shadow-lg transition-all"
-            style={{
-              boxShadow: '0 0 20px rgba(6,182,212,0.5), 0 4px 6px rgba(0,0,0,0.3)'
-            }}
-          >
-            PLAY AGAIN
-          </button>
         </div>
       )}
     </div>
