@@ -1,5 +1,5 @@
 // Next, React
-import { FC, useEffect, useRef, useState } from 'react';
+import { FC, useEffect, useRef, useState, useCallback } from 'react';
 import pkg from '../../../package.json';
 
 // ❌ DO NOT EDIT ANYTHING ABOVE THIS LINE
@@ -174,12 +174,12 @@ const GameSandbox: FC = () => {
   const SPRITE_INTERVAL = 150;
 
   // Audio helper function
-  const playSound = (audioRef: React.MutableRefObject<HTMLAudioElement | null>) => {
+  const playSound = useCallback((audioRef: React.MutableRefObject<HTMLAudioElement | null>) => {
     if (!isMuted && audioRef.current) {
       audioRef.current.currentTime = 0;
       audioRef.current.play().catch(() => {});
     }
-  };
+  }, [isMuted]);
   
   // Initialize projectile pool and audio
   useEffect(() => {
@@ -239,14 +239,14 @@ const GameSandbox: FC = () => {
   }, []);
 
   // Collision detection
-  const isColliding = (rect1: any, rect2: any): boolean => {
+  const isColliding = useCallback((rect1: any, rect2: any): boolean => {
     return (
       rect1.x < rect2.x + rect2.width &&
       rect1.x + rect1.width > rect2.x &&
       rect1.y < rect2.y + rect2.height &&
       rect1.y + rect1.height > rect2.y
     );
-  };
+  }, []);
 
   // Get free projectile from pool
   const getProjectile = () => {
@@ -254,7 +254,7 @@ const GameSandbox: FC = () => {
   };
 
   // Fire projectile
-  const fireProjectile = () => {
+  const fireProjectile = useCallback(() => {
     const proj = getProjectile();
     if (proj) {
       proj.active = true;
@@ -262,10 +262,10 @@ const GameSandbox: FC = () => {
       proj.y = playerRef.current.y;
       playSound(normalFireAudioRef);
     }
-  };
+  }, [playSound]);
 
   // Spawn wave
-  const spawnWave = () => {
+  const spawnWave = useCallback(() => {
     const waveId = Date.now(); // Unique ID for this wave
     const waveSpeedX = (Math.random() < 0.5 ? -1 : 1) * (1.3 + Math.random() * 0.7);
     const waveBaseX = GAME_WIDTH / 2 - (columnsRef.current * ENEMY_SIZE) / 2;
@@ -298,10 +298,10 @@ const GameSandbox: FC = () => {
     
     // Add to existing enemies instead of replacing
     enemiesRef.current = [...enemiesRef.current, ...newEnemies];
-  };
+  }, []);
 
   // Spawn boss
-  const spawnBoss = () => {
+  const spawnBoss = useCallback(() => {
     const waveId = Date.now();
     const boss: Enemy = {
       x: GAME_WIDTH / 2 - 50,
@@ -322,10 +322,10 @@ const GameSandbox: FC = () => {
     
     // Add boss to existing enemies
     enemiesRef.current = [...enemiesRef.current, boss];
-  };
+  }, []);
 
   // Next wave
-  const nextWave = () => {
+  const nextWave = useCallback(() => {
     setWave(prev => {
       const nextWave = prev + 1;
       if (nextWave % 5 === 0) {
@@ -341,7 +341,7 @@ const GameSandbox: FC = () => {
       }
       return nextWave;
     });
-  };
+  }, [spawnBoss, spawnWave]);
 
   // Update player
   const updatePlayer = () => {
@@ -368,7 +368,7 @@ const GameSandbox: FC = () => {
   };
 
   // Update enemies
-  const updateEnemies = () => {
+  const updateEnemies = useCallback(() => {
     const enemies = enemiesRef.current;
     
     if (enemies.length === 0) return;
@@ -431,10 +431,10 @@ const GameSandbox: FC = () => {
         });
       }
     });
-  };
+  }, []);
 
   // Update lasers
-  const updateLasers = () => {
+  const updateLasers = useCallback(() => {
     const isSmallLaser = keysRef.current.has('s');
     const isBigLaser = keysRef.current.has('d');
     
@@ -490,10 +490,10 @@ const GameSandbox: FC = () => {
     }
 
     setEnergy(Math.floor(energyRef.current));
-  };
+  }, [isMuted, isColliding]);
 
   // Check collisions
-  const checkCollisions = () => {
+  const checkCollisions = useCallback(() => {
     const player = playerRef.current;
     
     enemiesRef.current.forEach(enemy => {
@@ -559,10 +559,10 @@ const GameSandbox: FC = () => {
 
     // Start wave spawn timer continuously (not just when screen cleared)
     if (waveSpawnTimerRef.current === 0 && !gameOver && gameStarted) {
-      const spawnDelay = 2000 + Math.random() * 4000; // Random 2-6 seconds
+      const spawnDelay = 2000 + Math.random() * 3000; // Random 2-4 seconds
       waveSpawnTimerRef.current = spawnDelay;
     }
-  };
+  }, [gameOver, gameStarted, playSound, isColliding]);
 
   // Resume with coins
   const resumeWithCoins = () => {
@@ -583,7 +583,7 @@ const GameSandbox: FC = () => {
   };
 
   // Restart game
-  const restart = () => {
+  const restart = useCallback(() => {
     playSound(buttonClickAudioRef);
     // Coins already saved during gameplay, no need to add score again
     
@@ -614,7 +614,7 @@ const GameSandbox: FC = () => {
     if (!isMuted && gameplayBgAudioRef.current) {
       gameplayBgAudioRef.current.play().catch(() => {});
     }
-  };
+  }, [playSound, spawnWave, isMuted]);
 
   // Start game
   const startGame = () => {
@@ -709,7 +709,7 @@ const GameSandbox: FC = () => {
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
     };
-  }, [gameOver, gameStarted]);
+  }, [gameOver, gameStarted, fireProjectile, restart]);
 
   // Control background music based on game state
   useEffect(() => {
@@ -824,7 +824,7 @@ const GameSandbox: FC = () => {
     animationFrameId = requestAnimationFrame(gameLoop);
 
     return () => cancelAnimationFrame(animationFrameId);
-  }, [gameStarted, gameOver, isPaused]);
+  }, [gameStarted, gameOver, isPaused, fireProjectile, nextWave, updateEnemies, updateLasers, checkCollisions]);
 
   // RENDER
   
