@@ -559,7 +559,7 @@ const GameSandbox: FC = () => {
 
     // Start wave spawn timer continuously (not just when screen cleared)
     if (waveSpawnTimerRef.current === 0 && !gameOver && gameStarted) {
-      const spawnDelay = 2000 + Math.random() * 3000; // Random 2-4 seconds
+      const spawnDelay = 2000 + Math.random() * 2000; // Random 2-4 seconds
       waveSpawnTimerRef.current = spawnDelay;
     }
   }, [gameOver, gameStarted, playSound, isColliding]);
